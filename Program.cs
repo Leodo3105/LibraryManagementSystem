@@ -1,5 +1,6 @@
 ﻿using System.Text;
 using LibraryManagementSystem.Data;
+using LibraryManagementSystem.Services;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -73,6 +74,23 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
+
+// Add services to the container.
+builder.Services.AddControllers();
+
+// Cấu hình DbContext với PostgreSQL
+builder.Services.AddDbContext<ApplicationDbContext>(options =>
+    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
+
+// Đăng ký TokenService
+builder.Services.AddScoped<LibraryManagementSystem.Services.TokenService>();
+
+// Đăng ký OverdueBookService
+builder.Services.AddOverdueBookService();
+
+// Đăng ký OverdueBookService
+builder.Services.AddOverdueBookService();
+
 var app = builder.Build();
 
 // Configure the HTTP request pipeline.
@@ -84,11 +102,19 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+// Cấu hình để phục vụ static files
+app.UseStaticFiles();
+
+app.UseCors("AllowReactApp");
+
 app.UseCors("AllowReactApp");
 
 app.UseAuthentication();
 app.UseAuthorization();
 
 app.MapControllers();
+
+// Seed database khi khởi động ứng dụng
+DbSeeder.Initialize(app.Services);
 
 app.Run();
