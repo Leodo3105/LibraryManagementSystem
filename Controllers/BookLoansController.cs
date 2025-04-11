@@ -5,7 +5,9 @@ using System.Security.Claims;
 using System.Threading.Tasks;
 using LibraryManagementSystem.Data;
 using LibraryManagementSystem.DTOs;
+using LibraryManagementSystem.Helpers;
 using LibraryManagementSystem.Models;
+using LibraryManagementSystem.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -18,10 +20,14 @@ namespace LibraryManagementSystem.Controllers
     public class BookLoansController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly BookLoanStatusService _loanStatusService;
 
-        public BookLoansController(ApplicationDbContext context)
+        public BookLoansController(
+            ApplicationDbContext context,
+            BookLoanStatusService loanStatusService)
         {
             _context = context;
+            _loanStatusService = loanStatusService;
         }
 
         // GET: api/bookloans
@@ -64,11 +70,11 @@ namespace LibraryManagementSystem.Controllers
 
             // Apply pagination
             var totalItems = await query.CountAsync();
-            var totalPages = (int)Math.Ceiling(totalItems / (double)searchDto.PageSize);
+            var (skip, totalPages) = PaginationHelper.CalculatePagination(totalItems, searchDto.PageSize, searchDto.Page);
 
             var bookLoans = await query
                 .OrderByDescending(bl => bl.BorrowDate)
-                .Skip((searchDto.Page - 1) * searchDto.PageSize)
+                .Skip(skip)
                 .Take(searchDto.PageSize)
                 .Select(bl => new BookLoanDto
                 {
@@ -85,9 +91,7 @@ namespace LibraryManagementSystem.Controllers
                 })
                 .ToListAsync();
 
-            Response.Headers.Add("X-Pagination-TotalItems", totalItems.ToString());
-            Response.Headers.Add("X-Pagination-TotalPages", totalPages.ToString());
-            Response.Headers.Add("X-Pagination-CurrentPage", searchDto.Page.ToString());
+            PaginationHelper.AddPaginationHeaders(Response, totalItems, searchDto.PageSize, searchDto.Page);
 
             return Ok(bookLoans);
         }
@@ -135,10 +139,10 @@ namespace LibraryManagementSystem.Controllers
             // Check if book exists and is available
             var book = await _context.Books.FindAsync(bookLoanDto.BookId);
             if (book == null)
-                return BadRequest("Book not found");
+                return ApiResponseHelper.ErrorResponse("Book not found");
 
             if (book.AvailableCopies <= 0)
-                return BadRequest("No copies of this book are available");
+                return ApiResponseHelper.ErrorResponse("No copies of this book are available");
 
             // Check if user already has an active loan for this book
             var existingLoan = await _context.BookLoans
@@ -147,18 +151,10 @@ namespace LibraryManagementSystem.Controllers
                            bl.ReturnDate == null);
 
             if (existingLoan)
-                return BadRequest("You already have an active loan for this book");
+                return ApiResponseHelper.ErrorResponse("You already have an active loan for this book");
 
-            // Create the loan
-            var bookLoan = new BookLoan
-            {
-                UserId = currentUserId,
-                BookId = bookLoanDto.BookId,
-                BorrowDate = DateTime.UtcNow,
-                DueDate = DateTime.UtcNow.AddDays(14), // 14 days loan period
-                Status = "Pending", // Initial status is pending admin approval
-                Notes = bookLoanDto.Notes
-            };
+            // Create the loan using the service
+            var bookLoan = _loanStatusService.CreateDefaultLoan(currentUserId, bookLoanDto.BookId, bookLoanDto.Notes);
 
             _context.BookLoans.Add(bookLoan);
 
@@ -207,38 +203,25 @@ namespace LibraryManagementSystem.Controllers
                 return Forbid();
 
             // Regular users can only mark loans as returned
-            if (!isAdmin && bookLoanDto.Status != "Returned")
-                return BadRequest("You can only mark loans as returned");
-
-            // Check valid status transitions
-            if (!IsValidStatusTransition(bookLoan.Status, bookLoanDto.Status))
-                return BadRequest($"Invalid status transition from {bookLoan.Status} to {bookLoanDto.Status}");
-
-            // Process the update based on the new status
-            if (bookLoanDto.Status == "Returned" && bookLoan.ReturnDate == null)
-            {
-                // Mark as returned and update book's available copies
-                bookLoan.ReturnDate = DateTime.UtcNow;
-                bookLoan.Book.AvailableCopies++;
-            }
-            else if (bookLoanDto.Status == "Approved" && bookLoan.Status == "Pending")
-            {
-                // Book is now officially checked out
-                // No need to update available copies again as we already did that when creating the loan
-            }
-            else if (bookLoanDto.Status == "Rejected" && bookLoan.Status == "Pending")
-            {
-                // Rejected loan - return the book to inventory
-                bookLoan.Book.AvailableCopies++;
-            }
-
-            bookLoan.Status = bookLoanDto.Status;
-            bookLoan.Notes = bookLoanDto.Notes ?? bookLoan.Notes;
-            bookLoan.UpdatedAt = DateTime.UtcNow;
+            if (!isAdmin && bookLoanDto.Status != BookLoanStatusService.LoanStatus.Returned)
+                return ApiResponseHelper.ErrorResponse("You can only mark loans as returned");
 
             try
             {
+                // Process the status change using the service
+                _loanStatusService.ProcessStatusChange(bookLoan, bookLoanDto.Status);
+
+                // Update notes if provided
+                if (bookLoanDto.Notes != null)
+                {
+                    bookLoan.Notes = bookLoanDto.Notes;
+                }
+
                 await _context.SaveChangesAsync();
+            }
+            catch (InvalidOperationException ex)
+            {
+                return ApiResponseHelper.ErrorResponse(ex.Message);
             }
             catch (DbUpdateConcurrencyException)
             {
@@ -249,20 +232,6 @@ namespace LibraryManagementSystem.Controllers
             }
 
             return NoContent();
-        }
-
-        private bool IsValidStatusTransition(string currentStatus, string newStatus)
-        {
-            if (currentStatus == newStatus)
-                return true;
-
-            return currentStatus switch
-            {
-                "Pending" => newStatus == "Approved" || newStatus == "Rejected",
-                "Approved" => newStatus == "Returned" || newStatus == "Overdue",
-                "Overdue" => newStatus == "Returned",
-                _ => false
-            };
         }
 
         private bool BookLoanExists(int id)

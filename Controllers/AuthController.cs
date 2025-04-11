@@ -1,10 +1,8 @@
 ﻿using System;
-using System.Security.Claims;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
 using LibraryManagementSystem.Data;
 using LibraryManagementSystem.DTOs;
+using LibraryManagementSystem.Helpers;
 using LibraryManagementSystem.Models;
 using LibraryManagementSystem.Services;
 using Microsoft.AspNetCore.Mvc;
@@ -18,25 +16,29 @@ namespace LibraryManagementSystem.Controllers
     {
         private readonly ApplicationDbContext _context;
         private readonly TokenService _tokenService;
+        private readonly IPasswordService _passwordService;
 
-        public AuthController(ApplicationDbContext context, TokenService tokenService)
+        public AuthController(
+            ApplicationDbContext context,
+            TokenService tokenService,
+            IPasswordService passwordService)
         {
             _context = context;
             _tokenService = tokenService;
+            _passwordService = passwordService;
         }
 
         [HttpPost("register")]
         public async Task<ActionResult<AuthResponseDto>> Register(RegisterDto registerDto)
         {
             if (await _context.Users.AnyAsync(x => x.Username == registerDto.Username))
-                return BadRequest("Username is already taken");
+                return ApiResponseHelper.ErrorResponse("Username is already taken");
 
             if (await _context.Users.AnyAsync(x => x.Email == registerDto.Email))
-                return BadRequest("Email is already registered");
+                return ApiResponseHelper.ErrorResponse("Email is already registered");
 
-            // Sử dụng BCrypt.Net-Next cho mã hóa mật khẩu (thêm package này vào dự án)
-            // Hoặc dùng cách đơn giản hơn với SHA256
-            string passwordHash = HashPassword(registerDto.Password);
+            // Hash password using the service
+            string passwordHash = _passwordService.HashPassword(registerDto.Password);
 
             var user = new User
             {
@@ -70,8 +72,8 @@ namespace LibraryManagementSystem.Controllers
 
             if (user == null) return Unauthorized("Invalid username");
 
-            // Kiểm tra mật khẩu
-            if (!VerifyPassword(loginDto.Password, user.PasswordHash))
+            // Verify password using the service
+            if (!_passwordService.VerifyPassword(loginDto.Password, user.PasswordHash))
                 return Unauthorized("Invalid password");
 
             return new AuthResponseDto
@@ -85,29 +87,6 @@ namespace LibraryManagementSystem.Controllers
                     Role = user.Role
                 }
             };
-        }
-
-        // Phương thức hash mật khẩu đơn giản sử dụng SHA256
-        private string HashPassword(string password)
-        {
-            using (SHA256 sha256 = SHA256.Create())
-            {
-                byte[] bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-
-                StringBuilder builder = new StringBuilder();
-                for (int i = 0; i < bytes.Length; i++)
-                {
-                    builder.Append(bytes[i].ToString("x2"));
-                }
-                return builder.ToString();
-            }
-        }
-
-        // Phương thức xác thực mật khẩu
-        private bool VerifyPassword(string password, string storedHash)
-        {
-            string computedHash = HashPassword(password);
-            return computedHash == storedHash;
         }
     }
 }

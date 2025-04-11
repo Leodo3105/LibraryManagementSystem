@@ -11,11 +11,11 @@ var builder = WebApplication.CreateBuilder(args);
 // Add services to the container.
 builder.Services.AddControllers();
 
-// Cấu hình DbContext với PostgreSQL
+// Configure DbContext with PostgreSQL
 builder.Services.AddDbContext<ApplicationDbContext>(options =>
     options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
 
-// Cấu hình JWT Authentication
+// Configure JWT Authentication
 builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
     .AddJwtBearer(options =>
     {
@@ -32,11 +32,11 @@ builder.Services.AddAuthentication(JwtBearerDefaults.AuthenticationScheme)
         };
     });
 
-// Cấu hình CORS
+// Configure CORS
 builder.Services.AddCors(options =>
 {
     options.AddPolicy("AllowReactApp",
-        policy => policy.WithOrigins("http://localhost:3000") // Địa chỉ của React app
+        policy => policy.WithOrigins("http://localhost:3000") // React app address
                        .AllowAnyMethod()
                        .AllowAnyHeader()
                        .AllowCredentials());
@@ -48,7 +48,7 @@ builder.Services.AddSwaggerGen(c =>
 {
     c.SwaggerDoc("v1", new OpenApiInfo { Title = "Library Management API", Version = "v1" });
 
-    // Cấu hình Swagger để hỗ trợ JWT
+    // Configure Swagger to support JWT
     c.AddSecurityDefinition("Bearer", new OpenApiSecurityScheme
     {
         Description = "JWT Authorization header using the Bearer scheme. Example: \"Authorization: Bearer {token}\"",
@@ -74,22 +74,12 @@ builder.Services.AddSwaggerGen(c =>
     });
 });
 
-
-// Add services to the container.
-builder.Services.AddControllers();
-
-// Cấu hình DbContext với PostgreSQL
-builder.Services.AddDbContext<ApplicationDbContext>(options =>
-    options.UseNpgsql(builder.Configuration.GetConnectionString("DefaultConnection")));
-
-// Đăng ký TokenService
-builder.Services.AddScoped<LibraryManagementSystem.Services.TokenService>();
-
-// Đăng ký OverdueBookService
-builder.Services.AddOverdueBookService();
-
-// Đăng ký OverdueBookService
-builder.Services.AddOverdueBookService();
+// Register services
+builder.Services.AddScoped<TokenService>();
+builder.Services.AddScoped<IPasswordService, PasswordService>(); // New password service
+builder.Services.AddScoped<FileService>();
+builder.Services.AddScoped<BookLoanStatusService>(); // New book loan status service
+builder.Services.AddOverdueBookService(); // Register only once
 
 var app = builder.Build();
 
@@ -102,10 +92,8 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-// Cấu hình để phục vụ static files
+// Configure to serve static files
 app.UseStaticFiles();
-
-app.UseCors("AllowReactApp");
 
 app.UseCors("AllowReactApp");
 
@@ -114,7 +102,7 @@ app.UseAuthorization();
 
 app.MapControllers();
 
-// Seed database khi khởi động ứng dụng
+// Seed database when starting the application
 DbSeeder.Initialize(app.Services);
 
 app.Run();

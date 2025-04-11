@@ -1,9 +1,8 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using LibraryManagementSystem.Models;
+using LibraryManagementSystem.Services;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -16,6 +15,7 @@ namespace LibraryManagementSystem.Data
         {
             using var scope = serviceProvider.CreateScope();
             var context = scope.ServiceProvider.GetRequiredService<ApplicationDbContext>();
+            var passwordService = scope.ServiceProvider.GetRequiredService<IPasswordService>();
             var logger = scope.ServiceProvider.GetRequiredService<ILogger<Program>>();
 
             try
@@ -25,10 +25,10 @@ namespace LibraryManagementSystem.Data
                 // Seed data only if DB is empty
                 if (!context.Users.Any())
                 {
-                    logger.LogInformation("Bắt đầu seed dữ liệu...");
+                    logger.LogInformation("Starting database seeding...");
 
                     // 1. Seed Users
-                    SeedUsers(context);
+                    SeedUsers(context, passwordService);
 
                     // 2. Seed Categories
                     SeedCategories(context);
@@ -36,41 +36,25 @@ namespace LibraryManagementSystem.Data
                     // 3. Seed Books
                     SeedBooks(context);
 
-                    logger.LogInformation("Seed dữ liệu hoàn tất.");
+                    logger.LogInformation("Database seeding completed.");
                 }
             }
             catch (Exception ex)
             {
-                logger.LogError(ex, "Có lỗi xảy ra khi khởi tạo database.");
+                logger.LogError(ex, "An error occurred while initializing the database.");
                 throw;
             }
         }
 
-        private static void SeedUsers(ApplicationDbContext context)
+        private static void SeedUsers(ApplicationDbContext context, IPasswordService passwordService)
         {
-            // Hash password cho admin và user mẫu
-            string HashPassword(string password)
-            {
-                using (SHA256 sha256 = SHA256.Create())
-                {
-                    byte[] bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-
-                    StringBuilder builder = new StringBuilder();
-                    for (int i = 0; i < bytes.Length; i++)
-                    {
-                        builder.Append(bytes[i].ToString("x2"));
-                    }
-                    return builder.ToString();
-                }
-            }
-
             var users = new List<User>
             {
                 new User
                 {
                     Username = "admin",
                     Email = "admin@library.com",
-                    PasswordHash = HashPassword("Admin@123"),
+                    PasswordHash = passwordService.HashPassword("Admin@123"),
                     Role = "Admin",
                     CreatedAt = DateTime.UtcNow
                 },
@@ -78,7 +62,7 @@ namespace LibraryManagementSystem.Data
                 {
                     Username = "user1",
                     Email = "user1@example.com",
-                    PasswordHash = HashPassword("User@123"),
+                    PasswordHash = passwordService.HashPassword("User@123"),
                     Role = "User",
                     CreatedAt = DateTime.UtcNow
                 }
@@ -138,7 +122,7 @@ namespace LibraryManagementSystem.Data
 
             var books = new List<Book>
             {
-                // Sách khoa học viễn tưởng
+                // Science fiction books
                 new Book
                 {
                     Title = "Dune",
@@ -168,7 +152,7 @@ namespace LibraryManagementSystem.Data
                     CreatedAt = DateTime.UtcNow
                 },
                 
-                // Tiểu thuyết
+                // Novels
                 new Book
                 {
                     Title = "Trăm năm cô đơn",
@@ -198,7 +182,7 @@ namespace LibraryManagementSystem.Data
                     CreatedAt = DateTime.UtcNow
                 },
                 
-                // Công nghệ thông tin
+                // IT books
                 new Book
                 {
                     Title = "Clean Code: A Handbook of Agile Software Craftsmanship",
@@ -228,7 +212,7 @@ namespace LibraryManagementSystem.Data
                     CreatedAt = DateTime.UtcNow
                 },
                 
-                // Lịch sử
+                // History books
                 new Book
                 {
                     Title = "Sapiens: Lược sử loài người",

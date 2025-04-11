@@ -1,12 +1,12 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
-using System.Security.Cryptography;
-using System.Text;
 using System.Threading.Tasks;
 using LibraryManagementSystem.Data;
 using LibraryManagementSystem.DTOs;
+using LibraryManagementSystem.Helpers;
 using LibraryManagementSystem.Models;
+using LibraryManagementSystem.Services;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
@@ -19,10 +19,14 @@ namespace LibraryManagementSystem.Controllers
     public class AdminController : ControllerBase
     {
         private readonly ApplicationDbContext _context;
+        private readonly IPasswordService _passwordService;
 
-        public AdminController(ApplicationDbContext context)
+        public AdminController(
+            ApplicationDbContext context,
+            IPasswordService passwordService)
         {
             _context = context;
+            _passwordService = passwordService;
         }
 
         // GET: api/admin/dashboard
@@ -37,7 +41,7 @@ namespace LibraryManagementSystem.Controllers
             var overdueLoans = await _context.BookLoans
                 .CountAsync(bl => bl.ReturnDate == null && bl.DueDate < DateTime.UtcNow);
 
-            // Các sách được mượn nhiều nhất
+            // Most borrowed books
             var popularBooks = await _context.Books
                 .Include(b => b.BookLoans)
                 .OrderByDescending(b => b.BookLoans.Count)
@@ -45,7 +49,7 @@ namespace LibraryManagementSystem.Controllers
                 .Select(b => new { b.Id, b.Title, LoanCount = b.BookLoans.Count })
                 .ToListAsync();
 
-            // Các sách có sẵn gần hết
+            // Books with low stock
             var lowStockBooks = await _context.Books
                 .Where(b => b.AvailableCopies <= 2 && b.TotalCopies > 0)
                 .Select(b => new { b.Id, b.Title, b.AvailableCopies, b.TotalCopies })
@@ -102,13 +106,13 @@ namespace LibraryManagementSystem.Controllers
         public async Task<ActionResult<UserDto>> CreateUser(RegisterDto registerDto)
         {
             if (await _context.Users.AnyAsync(x => x.Username == registerDto.Username))
-                return BadRequest("Username is already taken");
+                return ApiResponseHelper.ErrorResponse("Username is already taken");
 
             if (await _context.Users.AnyAsync(x => x.Email == registerDto.Email))
-                return BadRequest("Email is already registered");
+                return ApiResponseHelper.ErrorResponse("Email is already registered");
 
-            // Mã hóa mật khẩu
-            string passwordHash = HashPassword(registerDto.Password);
+            // Hash password using the service
+            string passwordHash = _passwordService.HashPassword(registerDto.Password);
 
             var user = new User
             {
@@ -135,7 +139,7 @@ namespace LibraryManagementSystem.Controllers
         public async Task<IActionResult> UpdateUserRole(int id, [FromBody] string role)
         {
             if (role != "Admin" && role != "User")
-                return BadRequest("Role must be either 'Admin' or 'User'");
+                return ApiResponseHelper.ErrorResponse("Role must be either 'Admin' or 'User'");
 
             var user = await _context.Users.FindAsync(id);
             if (user == null)
@@ -147,22 +151,6 @@ namespace LibraryManagementSystem.Controllers
             await _context.SaveChangesAsync();
 
             return NoContent();
-        }
-
-        // Private method to hash passwords
-        private string HashPassword(string password)
-        {
-            using (SHA256 sha256 = SHA256.Create())
-            {
-                byte[] bytes = sha256.ComputeHash(Encoding.UTF8.GetBytes(password));
-
-                StringBuilder builder = new StringBuilder();
-                for (int i = 0; i < bytes.Length; i++)
-                {
-                    builder.Append(bytes[i].ToString("x2"));
-                }
-                return builder.ToString();
-            }
         }
     }
 }
